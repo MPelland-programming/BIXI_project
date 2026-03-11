@@ -40,12 +40,6 @@ eqint <- paste(targetvar,inteq)
 eqpolint <- paste(targetvar,inteq,"+",polyeq)
 eqpol <- paste(targetvar,polyeq)
 
-
-#Shortened equation for testing
-#equation <- "nb_departure ~ (area_park + len_cycle_path + len_major_road + len_minor_road + num_metro_stations + num_metro_stations +  
-#                                num_other_commercial + num_restaurants + num_pop + num_bus_stations + num_bus_routes + walkscore + capacity + 
-#                                humidity + mean_temp_c +holiday + total_precip_mm ) +(area_park + len_cycle_path + len_major_road)^2"
-
 ########################
 # Preprocessing
 #######################
@@ -85,9 +79,6 @@ lmodel <- data.frame(   #model.name           model.type    ,equation    ,opts
                      ,c("baseforest"       ,  "baseforest",  ""        , ""                           )
                      ,c("boost"            ,  "boost"     ,   ""       , ""                           )
                      )
-#lmodel <- as.data.frame(t(lmodel))
-#colnames(lmodel) <- c("name", "type", "equation","options")
-
 
 resultsdf <- data.frame(matrix(ncol = 6, nrow = 0))
 colnames(resultsdf) <- c("Method","Validation_RMSE", "Validation_MAE","Test_RMSE", "Test_MAE", "Parameters")
