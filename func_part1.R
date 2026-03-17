@@ -5,6 +5,7 @@ first_elements <- function(ll,n){
   return(ll[1:n])
 }
 
+# preprocessing function
 preprocessing <- function(rawdata,remove.na = TRUE){
   # Replace long station names solely by their numbers, provides a dictionary to go from one to the other. 
   # Finds minimum for nu of departures and rescales the variable to whol numbers. 
@@ -57,6 +58,7 @@ preprocessing <- function(rawdata,remove.na = TRUE){
   return(preproc_data)
 }
 
+#train_test_ids
 train_test_ids <- function(dat,n_split = 2,prop = c(0.8,0.2)){
   #Finds ids to split the dataset into n_split number of sub datasets.
   #The proportion of data in each is specified by prop. Note that the
@@ -82,6 +84,7 @@ train_test_ids <- function(dat,n_split = 2,prop = c(0.8,0.2)){
   return(fids)
 }
 
+#get_heatmap
 get_heatmap <- function(preproc){
   my_colors <- colorRampPalette(c("white","darkred", "yellow"))(5)
   
@@ -92,6 +95,7 @@ get_heatmap <- function(preproc){
          scale = "none")
 }
 
+#compute_error
 compute_error <- function(true_y,predicted_y, errtype = "all",minval=0){
   #Specifcy what type of error to use, choices are:
   # RMSE, 
@@ -117,6 +121,7 @@ compute_error <- function(true_y,predicted_y, errtype = "all",minval=0){
   return(err)
 }
 
+#get_polymeq
 get_polymeq <- function(df,np,yvar = "nb_departure"){
     #takes input as data frame and gets the n polynoms for
     #each varialble that is not a factor.
@@ -138,6 +143,7 @@ get_polymeq <- function(df,np,yvar = "nb_departure"){
     return(eq)
 }
 
+#fit_model_equation DEPRECATE
 fit_model_equation <- function(model.type,equation,options,training_data){
   #Takes as imput strings only, will put the stings together and run the model.
 
@@ -156,12 +162,13 @@ fit_model_equation <- function(model.type,equation,options,training_data){
 
   #fit the model
   tmodel <- eval(parse(text=paste(
-                        model.type, "(",equation, options,", data = training_data)"
+                        model.type, "(",equation,", data = training_data)"
                         ,sep = "")))
 
   return(tmodel)
 }
 
+#fit_model_noeq DEPRECATED
 fit_model_noeq <- function(model.type,xs,ys,options){
   #Takes as imput x (covariates) and ys to fit a model
 
@@ -179,83 +186,184 @@ fit_model_noeq <- function(model.type,xs,ys,options){
   return(tmodel)
 }
 
+#get_model_matrix
+get_model_matrix <- function(equation, data){
+  formu <- as.formula(equation)
+  x <- model.matrix(formu,data)[,-1]
+  return(x)
+}
+
+#fit_lm
+fit_lm <-  function(equation,training_data){
+    fitted_model = lm(equation, data = training_data)
+    return(fitted_model)
+}
+
+#fit_poisson glm
+fit_glm_poisson <-  function(equation,training_data){
+    fitted_model = glm(equation, family=poisson(link='log'), data = training_data)
+    return(fitted_model)
+}
+
+#fit lasso
+fit_lasso <- function(xs,ys){
+  fitted_model <- cv.glmnet(xs,ys,alpha=1)
+  return(fitted_model)
+}
+
+#fit ridge
+fit_ridge <- function(xs,ys){
+  fitted_model <- cv.glmnet(xs,ys,alpha=0)
+  return(fitted_model)
+}
+
+#fit elasticnet with alpha search
+fit_elasticnet <- function(training_data,lalpha){
+    #Split to get a validation set to select best alpha
+    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+    xs <- get_model_matrix(equation, training_data[ids[[1]],])[,-1]
+    ys <- training_data$nb_departure[ids[[1]]]
+
+    xv <- get_model_matrix(equation, training_data[ids[[2]],])[,-1]
+    yv <- training_data$nb_departure[ids[[2]]]
+
+    #get id for folds to have always the same.
+    foldid <- rep(seq(1,10,by=1),length.out = length(ys))
+
+    terr <- 1000000
+    best_alpha = 0
+    for (ii in 1:length(lalpha)){
+      alpha <- lalpha[ii]
+      fitted_model <- cv.glmnet(xs,ys,alpha=alpha,foldid = foldid)
+
+      yhatv <- predict(fitted_model,new=xv, s = "lambda.min")
+      temp_err <- compute_error(yv,yhatv, errtype = "RMSE")$rmse
+      if (temp_err < terr){
+          terr <- temp_err
+          best_alpha <- alpha
+      }
+    }
+
+    #train on all training data
+    xfull <- get_model_matrix(equation, training_data)[,-1]
+    yfull <- training_data$nb_departure
+    fitted_model <- cv.glmnet(xfull,yfull,alpha=best_alpha)####################################################### Should I force the lambad here?
+    return(fitted_model)
+}
+
+#fit relaxed elasticnet
+fit_relaxednet <- function(training_data){
+    formu <- as.formula(equation)
+    xs <- model.matrix(formu,training_data)[,-1]
+    ys <- training_data$nb_departure
+
+    fitted_model <- cv.glmnet(xs,ys, alpha=1,relax=TRUE)
+    return(fitted_model)
+}
+
+
 ############################
 # Main function
 #############################
 fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,test_data,min_zero = TRUE){
+
   opstr <- ""
   ################ begin model space #############################
-
+  # For each model, specify hyperparameter space and launch the fitting part.
+  #baseline
   if (model.type == "baseline"){
     yhat <- rep(mean(training_data$nb_departure),length(valid_data$nb_departure))
     yhattest <- rep(mean(training_data$nb_departure),length(test_data$nb_departure))
   }
-  
-  if (model.type == "lm" | model.type == "glm"){
-    fitted_model <- fit_model_equation(model.type,equation,opts,training_data)
+
+  #linear model
+  if (model.type == "lm"){
+    fitted_model <- fit_lm(equation,training_data)
     yhat <- predict(fitted_model,newdata = valid_data)
     yhattest <- predict(fitted_model, newdata=test_data)
-    
   }
 
-  if (model.type == "cv.glmnet"){
-    formu <- as.formula(equation)
-    xs <- model.matrix(formu,training_data)[,-1]
-    xvalid <- model.matrix(formu,valid_data)[,-1]
+  #poisson glm
+  if (model.type == "glm_poisson"){
+    fitted_model <- fit_glm_poisson(equation,training_data)
+    yhat <- predict(fitted_model,newdata = valid_data)
+    yhattest <- predict(fitted_model, newdata=test_data)
+  }
+
+  #lasso
+  if (model.type == "lasso"){
+    xs <- get_model_matrix(equation, training_data)
     ys <- training_data$nb_departure
+    xvalid <- get_model_matrix(equation, valid_data)
 
-    fitted_model <- fit_model_noeq(model.type,xs,ys,opts)
+    fitted_model <- fit_lasso(xs,ys)
 
-    yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
-    opstr <- fitted_model$lambda.1se
+    if (opts != "1se"){
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.min")
+      opstr <- fitted_model$lambda.min
+    } else {
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
+      opstr <- fitted_model$lambda.1se
+    }
   }
 
+  #ridge
+  if (model.type == "ridge"){
+    xs <- get_model_matrix(equation, training_data)
+    ys <- training_data$nb_departure
+    xvalid <- get_model_matrix(equation, valid_data)
+
+    fitted_model <- fit_ridge(xs,ys)
+
+    if (opts != "1se"){
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.min")
+      opstr <- fitted_model$lambda.min
+    } else {
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
+      opstr <- fitted_model$lambda.1se
+    }
+  }
+
+  #elasticnet
   if (model.type == "elasticnet"){
     lalpha <- seq(0,1,by=0.25)
-
-    #Split to get a validation set to select best alpha
-    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
-
-    formu <- as.formula(equation)
-
-    xs <- model.matrix(formu,training_data[ids[[1]],])[,-1]
-    ys <- training_data$nb_departure[ids[[1]]]
-    xv <- model.matrix(formu,training_data[ids[[2]],])[,-1]
-    yv <- training_data$nb_departure[ids[[2]]]
-    
-
-    errv <- numeric(length(lalpha))
-    for (ii in 1:length(lalpha)){
-      alpha <- lalpha[ii]
-      fitted_model <- cv.glmnet(xs,ys,alpha=alpha)
-
-      yhatv <- predict(fitted_model,new=xv, s = "lambda.1se")
-      errv[ii] <- compute_error(yv,yhatv, errtype = "RMSE")$rmse
-    }
-    #find best alpha
-    best_alpha <- lalpha[which.min(errv)]
-
-    fitted_model <- cv.glmnet(xs,ys,alpha=best_alpha)
 
     xvalid <- model.matrix(formu,valid_data)[,-1]
     xtest <-  model.matrix(formu,test_data)[,-1]
 
-    yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
-    yhattest <- predict(fitted_model, new=xtest, s = "lambda.1se")
-    opstr <- paste("alpha=",best_alpha,"lambda=",fitted_model$lambda.1se,sep="")
+    fitted_model <- fit_elasticnet(training_data,lalpha)
+
+    if (opts != "1se"){
+        yhat <- predict(fitted_model,new=xvalid, s = "lambda.min")
+        yhattest <- predict(fitted_model, new=xtest, s = "lambda.min")
+        opstr <- paste("alpha=",best_alpha,"lambda=",fitted_model$lambda.min,sep="")
+    } else {
+        yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
+        yhattest <- predict(fitted_model, new=xtest, s = "lambda.1se")
+        opstr <- paste("alpha=",best_alpha,"lambda=",fitted_model$lambda.1se,sep="")
+    }
   }
 
   if (model.type == "relaxlasso"){
-    formu <- as.formula(equation)
-    xs <- model.matrix(formu,training_data)[,-1]
+    #https://www.jstatsoft.org/article/view/v106i01 for why not using other alphas.
+    #while the relaxation can be applied for α values smaller than 1, we do not recommend
+    #doing this. Relaxation is typically applied to obtain sparser models. It achieves this
+    #by undoing shrinkage of coefficients in the active set toward zero... Selecting α smaller
+    #than 1 results in a larger active set than that for the lasso, working against the goal of obtaining a sparser model.
+
     xvalid <- model.matrix(formu,valid_data)[,-1]
     xtest <- model.matrix(formu,test_data)[,-1]
-    ys <- training_data$nb_departure
 
-    fitted_model <- cv.glmnet(xs,ys, alpha=1,relax=TRUE)
+    fitted_model <- fit_relaxednet(training_data)
 
-    yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se")
-    yhattest <- predict(fitted_model, new=xtest, s = "lambda.1se")
+    if (opts == "1se"){
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.1se", gamma = "gamma.1se")
+      opstr <- paste("Lambda = ",fitted_model$lambda.1se, ", gamma = ", fitted_model$relaxed$gamma.1se, sep = "")
+    } else {
+      yhat <- predict(fitted_model,new=xvalid, s = "lambda.min", gamma = "gamma.min")
+      opstr <- paste("Lambda = ",fitted_model$lambda.min, ", gamma = ", fitted_model$relaxed$gamma.min, sep = "")
+    }
   }
 
   if (model.type == "singletree"){

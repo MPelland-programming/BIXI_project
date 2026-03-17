@@ -69,10 +69,10 @@ test <- data.frame(preproc$data[temp[[3]],])                    #test set
 
 lmodel <- data.frame(   #model.name           model.type    ,equation    ,opts  
                      c("baseline"          , "baseline"   , ""         , "")
-                     ,c("poisson"          ,  "glm"       ,  eqpolint  , "family=poisson(link='log')" )
+                     ,c("poisson"          ,  "glm_poisson", eqpolint  , ""                           )
                      ,c("linear"           ,  "lm"        ,  eqpolint  , ""                           )
                      #,c("binom"           ,  "glm.nb"    ,  eqpolint  , ""                           )
-                     ,c("elasticnet"       ,  "elasticnet",  eqpolint  , ""                           )
+                     ,c("elasticnet"       ,  "elasticnet",  eqpolint  , "1se"                           )
                      ,c("relaxlasso"       ,  "relaxlasso",  eqpolint  , ""                           )
                      ,c("singletree"       ,  "singletree",  baseq     , ""                           )
                      ,c("conditional_tree" , "condtree"   , baseq         , ""                           ) 
