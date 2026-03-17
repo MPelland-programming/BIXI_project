@@ -262,6 +262,61 @@ fit_relaxednet <- function(training_data){
     return(fitted_model)
 }
 
+#fit tree
+fit_singletree <- function(equation,training_data,ms,mb,options){
+    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+     #hyperparameter search
+     terr <- 1000000
+     best_mb <- 0
+     best_ms <- 0
+     for (ii in ms){
+       for (jj in mb){
+         if (ms*2 > mb){ #avoids making trees that are impossible.
+             fitted_tree=rpart(as.formula(equation),
+                                data=training_data[ids[[1]],],
+                                method=options$method,
+                                control = rpart.control(xval = 10, minsplit=ms, minbucket = mb, cp = 0))
+
+             if (options$best == "1se"){
+                bstd=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xstd"]
+                berr=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xerror"]
+                minloc <- min(which(fitted_tree$cp[,"xerror"]<berr+bstd))
+
+                fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[minloc,"CP"],"CP"])
+             } else {
+                fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
+             }
+
+             yhatv <- predict(fitted_model,new = training_data[ids[[2]],])
+             temp_err <- compute_error(training_data$nb_departure[ids[[2]]],yhatv, errtype = "RMSE")$rmse
+             if (temp_err < terr){
+               terr <- temp_err
+               best_mb <- jj
+               best_ms <- ii
+             }
+         }
+       }
+     }
+
+    #Refit the model using the best hyperparams
+    fitted_tree=rpart(as.formula(equation),
+                    data=training_data,
+                    method=options$method,
+                    control = rpart.control(xval = 10, minsplit=best_ms, minbucket = best_mb, cp = 0))
+
+    if (options$best == "1se"){
+       bstd=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xstd"]
+       berr=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xerror"]
+       minloc <- min(which(fitted_tree$cp[,"xerror"]<berr+bstd))
+
+       fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[minloc,"CP"],"CP"])
+    } else {
+        fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
+    }
+
+    return(fitted_model)
+}
 
 ############################
 # Main function
@@ -345,6 +400,7 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     }
   }
 
+  #Relaxed net
   if (model.type == "relaxlasso"){
     #https://www.jstatsoft.org/article/view/v106i01 for why not using other alphas.
     #while the relaxation can be applied for α values smaller than 1, we do not recommend
@@ -366,40 +422,20 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     }
   }
 
+  #single tree regression and poisson
   if (model.type == "singletree"){
     #fits a single tree while varying minsplit, minbucket.
     ms <- c(5,10,15,20,25,30)
     mb <-  c(3,6,9,12,15)
 
+
+    params <- strsplit(trimws(strsplit(opts, ",")[[1]]), "=")
+    treeopts <- list()
+    treeopts$method <- params[[1]][2]
+    treeopts$best  <- params[[2]][2]
+
     #Split to get a validation set to select best alpha
-    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
-
-     errv <- matrix(0,nrow = length(ms), ncol = length(mb))
-     for (ii in 1:length(ms)){
-       for (jj in 1:length(mb)){
-         fitted_tree=rpart(as.formula(equation),
-                            data=training_data[ids[[1]],],
-                            method="anova",
-                            control = rpart.control(xval = 10, minsplit=ms[ii], minbucket = mb[jj], cp = 0))
-
-         fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
-
-         yhatv <- predict(fitted_model,new = training_data[ids[[2]],])
-         errv[ii,jj] <- compute_error(training_data$nb_departure[ids[[2]]],yhatv, errtype = "RMSE")$rmse
-       }
-     }
-
-     #find best minsplit and minbucket
-     best_ms <- ms[which(errv == min(errv), arr.ind = TRUE)[1]]
-     best_mb <- mb[which(errv == min(errv), arr.ind = TRUE)[2]]
-
-    #Refit the model using the best hyperparams
-    fitted_tree=rpart(as.formula(equation),
-                    data=training_data,
-                    method="anova",
-                    control = rpart.control(xval = 10, minsplit=best_ms, minbucket = best_mb, cp = 0))
-
-    fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
+    fitted_model <- fit_singletree(equation,training_data,ms,mb,treeopts)
 
     yhat <- predict(fitted_model,new=valid_data)
     yhattest <- predict(fitted_model, newdata=test_data)
