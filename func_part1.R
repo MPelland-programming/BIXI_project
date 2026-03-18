@@ -125,21 +125,42 @@ compute_error <- function(true_y,predicted_y, errtype = "all",minval=0){
 get_polymeq <- function(df,np,yvar = "nb_departure"){
     #takes input as data frame and gets the n polynoms for
     #each varialble that is not a factor.
+    lvar <- vector()
 
     tnam <- colnames(df)
     cnam <- tnam[-which(tnam == "nb_departure")]
 
-    eq <-""
     for (ii in 1:length(cnam)){
-      if(ii != 1){
-        eq <- paste(eq,"+",sep="")
-      }
-      if (np > 1 & !is.factor(df[[cnam[ii]]]) ){
-        eq <- paste(eq,"poly(",cnam[ii],",",np,",raw=TRUE)",sep="")
-      } else {
-        eq <- paste(eq,cnam[ii],sep="")
+      for (jj in 2:np){
+         if (!is.factor(df[[cnam[ii]]])){
+            lvar <- c(lvar,paste("I(",cnam[ii],"^",jj,")",sep=""))
+         }
       }
     }
+    eq <- paste(lvar, collapse = " + ")
+    return(eq)
+}
+
+#get interactions
+get_inteq <- function(df,yvar = "nb_departure",exceptpairs=""){
+    #takes input as ddata and writes down interactions
+    #Pairs can be excluded with the three lines below
+    if (exceptpairs == ""){
+      exceptpairs <- c("days","holiday")
+    }
+
+    tnam <- colnames(df)
+    lvar <- tnam[-which(tnam == "nb_departure")]
+
+    interactions <- vector()
+    for (ii in 1:(length(lvar)-1)){
+      for (jj in (ii+1):length(lvar)){
+         if (!any(sapply(exceptpairs, grepl, lvar[ii])) | !any(sapply(exceptpairs, grepl, lvar[jj]))){
+           interactions <- c(interactions, paste(lvar[ii], lvar[jj], sep=":"))
+         }
+      }
+    }
+    eq <- paste(interactions, collapse = " + ")
     return(eq)
 }
 
@@ -264,6 +285,159 @@ fit_relaxednet <- function(training_data){
     return(fitted_model)
 }
 
+#fit forward stepwise regression
+fit_forward <- function(equation,training_data,maxpass = 200,initeq = ""){
+    #split into training and validation
+    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+    #Get intercept only model as baseline
+    current_model <- lm(nb_departure ~ 1, data = training_data[ids[[1]],])
+    currerr <- compute_error(training_data$nb_departure[ids[[2]]], predict(current_model, newdata = training_data[ids[[2]],]), errtype = "RMSE")$rmse
+
+    equation <- gsub(" ", "", equation, fixed = TRUE)
+    vars <- strsplit(equation,"\\+|\\~")[[1]]
+
+    yvar <- vars[1]
+
+    if (initeq != ""){
+        initeq <- gsub(" ", "", initeq, fixed = TRUE)
+        initvars <- strsplit(initeq,"\\+|\\~")[[1]]
+        curreq <- paste(yvar, "~", paste(initvars, collapse="+"), sep="")
+        varout <- vars[! vars %in% initvars & vars != yvar]
+    } else {
+        curreq <- paste(yvar,"~1",sep="")
+         varout <- vars[-1]
+    }
+
+    imp <- TRUE
+    npass <- 1
+    while(imp){
+        if(length(varout) == 0){
+            imp <- FALSE
+            break
+        }
+        npass <- npass + 1
+
+        bestvar <- NULL
+        besterr <- currerr
+        for(nn in varout){
+            tempeq <- paste(curreq, nn, sep="+")
+            temp_model <- lm(tempeq, data = training_data[ids[[1]],])
+
+            temp_err <- compute_error(training_data$nb_departure[ids[[2]]]
+                                       , predict(temp_model, newdata = training_data[ids[[2]],])
+                                       , errtype = "RMSE")$rmse
+
+            if(temp_err < besterr){
+                besterr <- temp_err
+                bestvar <- nn
+            }
+        }
+        print(curreq)
+        if (besterr < currerr-0.00000001 & npass < maxpass){
+            currerr <- besterr
+            curreq <- paste(curreq, bestvar, sep="+")
+            varout <- varout[! varout %in% bestvar]
+        } else {
+            imp <- FALSE
+            m <- list()
+            m$best_model <- lm(curreq, data = training_data)
+            m$nvars <- length(strsplit(curreq,"\\+|\\~")[[1]])-1
+            m$eq <- curreq
+            m$err <- currerr
+            return(m)
+        }
+
+
+    }
+}
+
+#fit backward stepwise regression
+fit_backward <- function(equation,training_data,max_pass = 200){
+    #split into training and validation
+    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+    #Get full model as baseline
+    current_model <- lm(equation, data = training_data[ids[[1]],])
+    currerr <- compute_error(training_data$nb_departure[ids[[2]]], predict(current_model, newdata = training_data[ids[[2]],]), errtype = "RMSE")$rmse
+
+    equation <- gsub(" ", "", equation, fixed = TRUE)
+    vars <- strsplit(equation,"\\+|\\~")[[1]]
+
+    yvar <- vars[1]
+    varout <- vars[-1]
+
+    curreq <- equation
+
+    imp <- TRUE
+    npass <- 1
+    while(imp){
+        bestvar <- NULL
+        besterr <- currerr
+        for(nn in varout){
+            tempeq <- gsub(paste("+",nn,sep=""),"",curreq,fixed=TRUE)
+            temp_model <- lm(tempeq, data = training_data[ids[[1]],])
+
+            temp_err <- compute_error(training_data$nb_departure[ids[[2]]]
+                                       , predict(temp_model, newdata = training_data[ids[[2]],])
+                                       , errtype = "RMSE")$rmse
+
+            if(temp_err < besterr){
+                besterr <- temp_err
+                bestvar <- nn
+            }
+        }
+        if (besterr < currerr-0.00000001 & npass < max_pass){
+            currerr <- besterr
+            curreq <- gsub(paste("+",bestvar,sep=""),"",curreq,fixed=TRUE)
+            varout <- varout[! varout %in% bestvar]
+        } else {
+            imp <- FALSE
+            m <- list()
+            m$best_model <- lm(curreq, data = training_data)
+            m$nvars <- length(strsplit(curreq,"\\+|\\~")[[1]])-1
+            m$eq <- curreq
+            m$err <- currerr
+            return(m)
+        }
+
+    }
+}
+
+#fit stepwise regression
+fit_stepwise <- function(equation,training_data){
+    #split into training and validation
+    #After two variables have been selected by forward, do a backward pass. Then alternate between forward and backward.
+
+    fulleq <- equation
+    imp <- TRUE
+    npass <- 1
+    max_iter <- 200
+
+    while(imp<= max_iter){
+        if (npass == 1){
+            m <- fit_forward(fulleq,training_data,max_pass = 5)
+            equation <- m$eq
+            currerr <- m$err
+        }else if(npass %% 2 == 0){
+            m <- fit_forward(fulleq,training_data,max_pass = 5, initeq = equation)
+            equation <- m$eq
+            if (m$err < currerr-0.00000001){
+                currerr <- m$err
+            } else {
+                imp <- FALSE
+                return(m)
+            }
+        } else {
+            m <- fit_backward(equation,training_data)
+            equation <- m$eq
+            currerr <- m$err
+        }
+        npass <- npass + 1
+    }
+    return(m)
+}
+
 #fit tree
 fit_singletree <- function(equation,training_data,ms,mb,options){
     ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
@@ -285,7 +459,7 @@ fit_singletree <- function(equation,training_data,ms,mb,options){
                 berr=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xerror"]
                 minloc <- min(which(fitted_tree$cp[,"xerror"]<berr+bstd))
 
-                fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[minloc,"CP"],"CP"])
+                fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[minloc,"CP"])
              } else {
                 fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
              }
@@ -494,6 +668,8 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
       opstr <- paste("Lambda = ",fitted_model$lambda.min, ", gamma = ", fitted_model$relaxed$gamma.min, sep = "")
     }
   }
+
+  #Forward
 
   #single tree regression and poisson
   if (model.type == "singletree"){

@@ -1,7 +1,7 @@
 ###############
 #Setup packages
 ###############
-packages <- c("here","MASS","glmnet","rpart","party","randomForest","gbm","car")
+packages <- c("here","MASS","glmnet","rpart","party","randomForest","gbm","car")#,"glmboost")
 
 installed_packages <- packages %in% rownames(installed.packages())
 if (any(installed_packages == FALSE)) {
@@ -30,15 +30,16 @@ preproc <- preprocessing(rawdata)
 ########################
 #Equation forthe model 
 ######################
-baseq <- "nb_departure ~area_park + len_cycle_path + len_major_road + len_minor_road + num_metro_stations + num_university + num_other_commercial + num_restaurants + num_pop + num_bus_stations + num_bus_routes + walkscore + capacity +  humidity + mean_temp_c +holiday + total_precip_mm + days"
+baseq <- "area_park + len_cycle_path + len_major_road + len_minor_road + num_metro_stations + num_university + num_other_commercial + num_restaurants + num_pop + num_bus_stations + num_bus_routes + walkscore + capacity +  humidity + mean_temp_c +holiday + total_precip_mm + days"
 
 targetvar <- "nb_departure ~"
-inteq <- "(area_park + len_cycle_path + len_major_road + len_minor_road + num_metro_stations + num_metro_stations + num_university + num_other_commercial + num_restaurants + num_pop + num_bus_stations + num_bus_routes + walkscore + capacity +  humidity + mean_temp_c +holiday + total_precip_mm )^2 +  (area_park + len_cycle_path + len_major_road + len_minor_road +num_metro_stations + num_university +  num_other_commercial + num_restaurants + num_pop + num_bus_stations + num_bus_routes + walkscore + capacity +  humidity + mean_temp_c + total_precip_mm + days)^2"
+inteq <- get_inteq(preproc$data,yvar = "nb_departure")
 polyeq <- get_polymeq(preproc$data,3,yvar = "nb_departure") 
 
-eqint <- paste(targetvar,inteq)
-eqpolint <- paste(targetvar,inteq,"+",polyeq)
-eqpol <- paste(targetvar,polyeq)
+eqbase <- paste(targetvar,baseq)
+eqint <- paste(targetvar,baseq,"+",inteq)
+eqpolint <- paste(targetvar,baseq,"+",inteq,"+",polyeq)
+eqpol <- paste(targetvar,baseq,"+",polyeq)
 
 ########################
 # Preprocessing
@@ -74,9 +75,9 @@ lmodel <- data.frame(   #model.name           model.type    ,equation    ,opts
                      #,c("binom"           ,  "glm.nb"    ,  eqpolint  , ""                           )
                      ,c("elasticnet"       ,  "elasticnet",  eqpolint  , "1se"                           )
                      ,c("relaxlasso"       ,  "relaxlasso",  eqpolint  , ""                           )
-                     ,c("regressiontree"   ,  "singletree",  baseq     , "method=anova, hyper=1se"         )
-                     ,c("poissontree"      ,  "singletree",  baseq     , "method=poisson, hyper=1se"         )
-                     ,c("conditional_tree" ,  "condtree"   , baseq         , ""                           )
+                     ,c("regressiontree"   ,  "singletree",  eqbase     , "method=anova, hyper=1se"         )
+                     ,c("poissontree"      ,  "singletree",  eqbase     , "method=poisson, hyper=1se"         )
+                     ,c("conditional_tree" ,  "condtree"   , eqbase         , ""                           )
                      ,c("baseforest"       ,  "baseforest",  ""        , ""                           )
                      ,c("boosttree"            ,  "boost"     ,   ""       , ""                           )
                      )
