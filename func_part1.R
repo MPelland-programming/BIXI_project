@@ -249,7 +249,9 @@ fit_elasticnet <- function(training_data,lalpha){
     xfull <- get_model_matrix(equation, training_data)[,-1]
     yfull <- training_data$nb_departure
     fitted_model <- cv.glmnet(xfull,yfull,alpha=best_alpha)####################################################### Should I force the lambad here?
-    return(fitted_model)
+    m.fitted_model <- fitted_model
+    m.best_alpha <- best_alpha
+    return(m)
 }
 
 #fit relaxed elasticnet
@@ -310,12 +312,81 @@ fit_singletree <- function(equation,training_data,ms,mb,options){
        berr=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"xerror"]
        minloc <- min(which(fitted_tree$cp[,"xerror"]<berr+bstd))
 
-       fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[minloc,"CP"],"CP"])
+       cp <- fitted_tree$cp[minloc,"CP"]
+       fitted_model <- prune(fitted_tree,cp=cp)
     } else {
-        fitted_model <- prune(fitted_tree,cp=fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"])
+        cp <- fitted_tree$cp[which.min(fitted_tree$cp[,"xerror"]),"CP"]
+        fitted_model <- prune(fitted_tree,cp=cp)
     }
+    m.fitted_model <- fitted_model
+    m$best_mb <- best_mb
+    m$best_ms <- best_ms
+    m$cp <- cp
+    return(m)
+}
 
-    return(fitted_model)
+#fit randomForest
+fit_randomForest <- function(training_data,ntree,nodesize,maxnodes,mtry){
+    terr <- 1000000
+    for (tt in ntree){for (nn in nodesize){for (mm in maxnodes){for (mt in mtry){
+        print(paste("     Trying model with: ", tt, " trees, ",nn," node size, ", mm, " max nodes,", mt, " variables"))
+        temp_model <- randomForest(nb_departure~.
+                                    ,data=training_data
+                                    ,ntree=tt
+                                    ,nodesize=nn
+                                    ,maxnodes=mm
+                                    ,mtry=mt
+                                    )
+
+        temp_err <- temp_model$mse[length(rf$mse)] #get the oob mse.
+        if (temp_err < terr){
+          fitted_model = temp_model
+          terr <- temp_err
+          hyperpar <- c(tt,nn,mm,mt)
+        }
+    }}}
+    }
+    m$fitted_model <- fitted_model
+    m$hyperpar <- hyperpar
+    return(m)
+}
+
+#fit_boosted_tree
+fit_boosted_tree <- function(training_data,n.trees,interaction.depth,shrinkage){
+    #Split to get a validation set to select best alpha
+    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+    terr <- 1000000
+    for (tt in n.trees){for (id in interaction.depth){for (sh in shrinkage){
+      print(paste("     Trying model with: ", tt, " trees, ", id ," max depth, ", sh, " shrinkage."))
+      temp_model=gbm(nb_departure~.
+                      ,data=training_data[ids[[1]],]
+                      ,distribution="gaussian"
+                      ,n.trees=tt
+                      ,interaction.depth = id
+                      ,shrinkage =sh
+                      ,verbose = FALSE
+                      )
+
+      yhatv <- predict(temp_model, newdata=training_data[ids[[2]],])
+      temp_err <- compute_error(training_data$nb_departure[ids[[2]]],yhatv, errtype = "RMSE")$rmse
+      if (temp_err < terr){
+        terr <- temp_err
+        hyperpar <- c(tt,id,sh)
+      }
+    }}}
+
+    fitted_model=gbm(nb_departure~.
+                  ,data=training_data[ids[[1]],]
+                  ,distribution="gaussian"
+                  ,n.trees=hyperpar[1]
+                  ,interaction.depth = hyperpar[2]
+                  ,shrinkage = hyperpar[3]
+                  )
+
+    m$fitted_model <- fitted_model
+    m$hyperpar <- hyperpar
+    return(m)
 }
 
 ############################
@@ -387,7 +458,9 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     xvalid <- model.matrix(formu,valid_data)[,-1]
     xtest <-  model.matrix(formu,test_data)[,-1]
 
-    fitted_model <- fit_elasticnet(training_data,lalpha)
+    m <- fit_elasticnet(training_data,lalpha)
+    fitted_model <- m$fitted_model
+    best_alpha <- m$best_alpha
 
     if (opts != "1se"){
         yhat <- predict(fitted_model,new=xvalid, s = "lambda.min")
@@ -428,18 +501,17 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     ms <- c(5,10,15,20,25,30)
     mb <-  c(3,6,9,12,15)
 
-
     params <- strsplit(trimws(strsplit(opts, ",")[[1]]), "=")
     treeopts <- list()
     treeopts$method <- params[[1]][2]
     treeopts$best  <- params[[2]][2]
 
     #Split to get a validation set to select best alpha
-    fitted_model <- fit_singletree(equation,training_data,ms,mb,treeopts)
+    m <- fit_singletree(equation,training_data,ms,mb,treeopts)
 
-    yhat <- predict(fitted_model,new=valid_data)
-    yhattest <- predict(fitted_model, newdata=test_data)
-    opstr <- paste("minsplit=", best_ms, " minbucket=", best_mb, " cp=", fitted_tree$cp[which.min(fitted_tree$cp[, "xerror"]), "CP"], sep="")
+    yhat <- predict(m.fitted_model,new=valid_data)
+    yhattest <- predict(m.fitted_model, newdata=test_data)
+    opstr <- paste("minsplit=", m.best_ms, " minbucket=", m.best_mb, " cp=", m.cp, sep="")
   }
 
   if (model.type == "condtree"){
@@ -449,84 +521,35 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     yhattest <- predict(fitted_model, newdata=test_data, type = "response")
   }
 
+  #baseforest
   if (model.type == "baseforest"){
     #fits a forest
-    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
-    n_train <- length(ids[[1]])
     ntree = c(200, 300, 400)
     nodesize = c(10, 50, 100)
     maxnodes = c(100,200)
     mtry = floor(c(0.33, 0.5,0.83)* dim(training_data)[2])
 
-    terr <- 1000000
-    for (tt in ntree){for (nn in nodesize){for (mm in maxnodes){for (mt in mtry){
-                print(paste("     Trying model with: ", tt, " trees, ",nn," node size, ", mm, " max nodes,", mt, " variables"))
-                temp_model <- randomForest(nb_departure~.
-                                            ,data=training_data[ids[[1]],]
-                                            ,ntree=tt
-                                            ,nodesize=nn
-                                            ,maxnodes=mm
-                                            ,mtry=mt
-                                            )
-                yhatv <- predict(temp_model,newdata=training_data[ids[[2]],])
-                temp_err <- compute_error(training_data$nb_departure[ids[[2]]],yhatv, errtype = "RMSE")$rmse
-                if (temp_err < terr){
-                  terr <- temp_err
-                  hyperpar <- c(tt,nn,mm,mt)
-                }
-            }}}
-    }
-    fitted_model <- (randomForest(nb_departure~.
-                                            ,data=training_data
-                                            ,ntree=hyperpar[1]
-                                            ,nodesize=hyperpar[2]
-                                            ,maxnodes=hyperpar[3]
-                                            ,mtry=hyperpar[4]
-                                            )
-                        )
+    m <- fit_randomForest(training_data,ntree,nodesize,maxnodes,mtry)
+    fitted_model <- m$model
+    hyperpar <- m$hyperpar
+
     yhat <- predict(fitted_model,newdata=valid_data)
     yhattest <- predict(fitted_model, newdata=test_data)
     opstr <- paste("ntree=", hyperpar[1], " nodesize=", hyperpar[2], " maxnodes=", hyperpar[3], "mtry=",hyperpar[4], sep="")
   }
-  
-  if (model.type == "boost"){
-    ids <- train_test_ids(training_data,n_split = 2,prop = c(0.8,0.2))
+
+  #boosted tree
+  if (model.type == "boosttree"){
 
     n.trees = c(50,100,200)
     interaction.depth = 5
     shrinkage = 0.5
 
-    terr <- 1000000
-    for (tt in n.trees){for (id in interaction.depth){for (sh in shrinkage){
-      print(paste("     Trying model with: ", tt, " trees, ", id ," max depth, ", sh, " shrinkage."))
-      temp_model=gbm(nb_departure~.
-                      ,data=training_data[ids[[1]],]
-                      ,distribution="gaussian"
-                      ,n.trees=tt
-                      ,interaction.depth = id
-                      ,shrinkage =sh
-                      ,verbose = FALSE
-                      )
-      
-      yhatv <- predict(temp_model, newdata=training_data[ids[[2]],])
-      temp_err <- compute_error(training_data$nb_departure[ids[[2]]],yhatv, errtype = "RMSE")$rmse
-      if (temp_err < terr){
-        terr <- temp_err
-        hyperpar <- c(tt,id,sh)
-      }
-    }}}
+    m <- fit_boosted_tree(training_data,n.trees,interaction.depth,shrinkage)
 
-    fitted_model=gbm(nb_departure~.
-                      ,data=training_data[ids[[1]],]
-                      ,distribution="gaussian"
-                      ,n.trees=hyperpar[1]
-                      ,interaction.depth = hyperpar[2]
-                      ,shrinkage = hyperpar[3]
-                      )
-
-    yhat <- predict(fitted_model, newdata=valid_data)
-    yhattest <- predict(fitted_model, newdata=test_data)
-    opstr <- paste("ntree=", hyperpar[1], " treedepth=", hyperpar[2], " epsilon=", hyperpar[3], sep="")
+    yhat <- predict(m.fitted_model, newdata=valid_data)
+    yhattest <- predict(m.fitted_model, newdata=test_data)
+    opstr <- paste("ntree=", m.hyperpar[1], " treedepth=", m.hyperpar[2], " epsilon=", m.hyperpar[3], sep="")
   }
 
   ############################ end model space #############################S

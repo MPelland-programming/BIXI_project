@@ -76,9 +76,9 @@ lmodel <- data.frame(   #model.name           model.type    ,equation    ,opts
                      ,c("relaxlasso"       ,  "relaxlasso",  eqpolint  , ""                           )
                      ,c("regressiontree"   ,  "singletree",  baseq     , "method=anova, hyper=1se"         )
                      ,c("poissontree"      ,  "singletree",  baseq     , "method=poisson, hyper=1se"         )
-                     ,c("conditional_tree" , "condtree"   , baseq         , ""                           ) 
+                     ,c("conditional_tree" ,  "condtree"   , baseq         , ""                           )
                      ,c("baseforest"       ,  "baseforest",  ""        , ""                           )
-                     ,c("boost"            ,  "boost"     ,   ""       , ""                           )
+                     ,c("boosttree"            ,  "boost"     ,   ""       , ""                           )
                      )
 
 resultsdf <- data.frame(matrix(ncol = 6, nrow = 0))
