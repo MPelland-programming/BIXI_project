@@ -1,7 +1,7 @@
 ###############
 #Setup packages
 ###############
-packages <- c("here","MASS","glmnet","rpart","party","randomForest","gbm","car")#,"glmboost")
+packages <- c("here","MASS","glmnet","rpart","party","randomForest","gbm","car","mboost")
 
 installed_packages <- packages %in% rownames(installed.packages())
 if (any(installed_packages == FALSE)) {
@@ -61,12 +61,23 @@ if (prun){######################################################################
   n_split = 3
 }
 temp <- train_test_ids(preproc$data,n_split=n_split,prop = props)
+iddf
 
 
 train <- data.frame(preproc$data[temp[[3]],])                 #small training set
 valid <- data.frame(preproc$data[temp[[2]],])                #validation set#########################################remove
-test <- data.frame(preproc$data[temp[[3]],])                    #test set
-#remove(list = "temp")
+test <- data.frame(preproc$data[temp[[1]],])                    #test set
+
+remove(list = "temp")
+
+preproc_id <- cbind(preproc$data,preproc$station_id)
+names(preproc_id)[length(names(preproc_id))]<-"stationid"
+
+trainid <- preproc_id[temp[[3]],]                 #small training set
+validid <- preproc_id[temp[[2]],]                #validation set#########################################remove
+testid <- preproc_id[temp[[1]],]                    #test set
+
+remove("preproc_id")
 
 lmodel <- data.frame(   #model.name           model.type    ,equation    ,opts  
                      c("baseline"          , "baseline"   , ""         , "")
@@ -90,3 +101,5 @@ for (mm in lmodel){
   tout <- fit_predict_err(mm[2],mm[3],mm[4],train,valid,test)
   resultsdf[nrow(resultsdf) + 1,] = c(mm[1],tout$rmse,tout$mae,tout$testrmse,tout$testmae,tout$opstr)
 }
+
+#Note: exploratory analyses on mboost revealed very little improvement past 1000 (from 1000 to 5000, the gain in MAE is 0.5)

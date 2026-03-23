@@ -52,7 +52,8 @@ preprocessing <- function(rawdata,remove.na = TRUE){
   preproc_data$data$holiday <- relevel(as.factor(preproc_data$data$holiday), ref = "0")
   preproc_data$data$num_university <- relevel(as.factor(preproc_data$data$num_university), ref = "0")
   
-  #Return only relevant columns 
+  #Return only relevant columns
+  preproc_data$station_id <- preproc_data$data$location
   preproc_data$data <- preproc_data$data[-c(1,2,18)] #add 11 if want to remove universities
   
   return(preproc_data)
@@ -563,6 +564,42 @@ fit_boosted_tree <- function(training_data,n.trees,interaction.depth,shrinkage){
     return(m)
 }
 
+#fit boostreg
+fit_boostreg <- function(equation,training_data,niter,shrink){
+    #Split to get a validation set to select best alpha
+    #We can extract the MSE from the cvrisk output which essentially lists MSE of OOB (25 bootstrap samples)
+    #Technically, the doc says they are weighted, but they are all weighted to 1 (I checked manually)
+
+    terr <- 1000000
+    for (sh in shrink){for(ni in niter){
+      print(paste("     Trying model with: ", ni, " iterations, ", sh ," shrinkage."))
+      temp_model=glmboost(as.formula(equation),
+                      data=training_data,
+                      control=boost_control(mstop=ni,nu=sh)
+                      )
+
+      cv_error=cvrisk(temp_model,grid = 1:floor(ni/50)*50)
+      temp_err <- min(cv_error)
+      best_iter=mstop(cv_error)
+
+      if (temp_err < terr){
+        terr <- temp_err
+        fmstop <- ni
+        fshrink <- sh
+        fncoef <- length(coef(temp_model[best_iter]))
+        fitted_model <- temp_model[best_iter]
+      }
+    }}
+
+    m$fitted_model <- fitted_model
+    m$n_iter <- fmstop
+    m$shrink <- fshrink
+    m$ncoef <- fncoef
+    m$
+    return(m)
+
+}
+
 ############################
 # Main function
 #############################
@@ -685,9 +722,9 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     #Split to get a validation set to select best alpha
     m <- fit_singletree(equation,training_data,ms,mb,treeopts)
 
-    yhat <- predict(m.fitted_model,new=valid_data)
-    yhattest <- predict(m.fitted_model, newdata=test_data)
-    opstr <- paste("minsplit=", m.best_ms, " minbucket=", m.best_mb, " cp=", m.cp, sep="")
+    yhat <- predict(m$fitted_model,new=valid_data)
+    yhattest <- predict(m$fitted_model, newdata=test_data)
+    opstr <- paste("minsplit=", m$best_ms, " minbucket=", m$best_mb, " cp=", m$cp, sep="")
   }
 
   if (model.type == "condtree"){
@@ -713,6 +750,18 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
     yhattest <- predict(fitted_model, newdata=test_data)
     opstr <- paste("ntree=", hyperpar[1], " nodesize=", hyperpar[2], " maxnodes=", hyperpar[3], "mtry=",hyperpar[4], sep="")
   }
+  #boosted regression
+  if (model.type =="boostreg"){
+    niter == 6000
+    shrink <- c(0.2,0.1, 0.05)
+
+    m <- fit_boostreg(equation,training_data,niter,shrink)
+
+    yhat <- predict(m$fitted_model,new=valid_data)
+    yhattest <- predict(m$fitted_model, new=test_data)
+    opstr <- paste("number_iterations=", m$n_iter, " shrinkage=", m$shrink, " number_coefficients=", m$ncoef, sep="")
+  }
+
 
   #boosted tree
   if (model.type == "boosttree"){
@@ -725,7 +774,7 @@ fit_predict_err <-  function(model.type,equation,opts,training_data,valid_data,t
 
     yhat <- predict(m.fitted_model, newdata=valid_data)
     yhattest <- predict(m.fitted_model, newdata=test_data)
-    opstr <- paste("ntree=", m.hyperpar[1], " treedepth=", m.hyperpar[2], " epsilon=", m.hyperpar[3], sep="")
+    opstr <- paste("ntree=", m$hyperpar[1], " treedepth=", m$hyperpar[2], " epsilon=", m$hyperpar[3], sep="")
   }
 
   ############################ end model space #############################S
