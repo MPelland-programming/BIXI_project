@@ -68,7 +68,7 @@ aggregate_by_station <- function(dat, na_zeros = TRUE){
   
   agg_nb_departure <- aggregate(dat["nb_departure"]
                                 , by = list(dat$location)
-                                , FUN = sum
+                                , FUN = mean
   )
   
   agg_nb_departure$nb_departure <- agg_nb_departure$nb_departure/mindeparture 
