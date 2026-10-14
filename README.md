@@ -83,9 +83,10 @@ For the kriging models, the variogram family is chosen by 5-fold cross-validatio
 Each model reports **RMSE** and **MAE** on the validation set and the test set, together with the selected hyperparameters. Predictions are clipped at zero before errors are computed. The kriging-based models report cross-validated errors in the validation columns.
 
 ## Results
-
+### Non-spatial models
 <img width="900" height="604" alt="image" src="https://github.com/user-attachments/assets/dcf3a77a-7c9a-4d61-a5e9-209e623e8a45" />
 
+### Spatial models
 <img width="963" height="452" alt="image" src="https://github.com/user-attachments/assets/f83c48bf-df4b-4cd4-b85e-268fc85532cc" />
 
 
